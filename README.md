@@ -2,10 +2,10 @@
 iptables python wrapper for easy firewall configuration on linux
 
 ## Setup
-- Create a folder in root /root/firewall/
-- Copy the scripts and config files to that folder
+- Create the folder `mkdir /root/firewall/`
+- Copy/Extract the scripts and config files to that folder
 - Customise the configuration files
-- Make sure the script is executable `chmod +x firewall.python`
+- Make sure the `firewall.python` script is executable
 - Run the firewall.python script
 
 ## Load script on boot
