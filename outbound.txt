@@ -1,5 +1,3 @@
 # syntax: interface proto [destAddr] [destPort]
 # example: eth0 tcp ANY 80
 
-eth0 tcp ANY 80
-
