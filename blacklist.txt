@@ -1,0 +1,2 @@
+# just list IP addresses you wish to ban
+# example: 8.8.8.8

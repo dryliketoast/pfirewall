@@ -1,0 +1,288 @@
+#!/usr/bin/python
+
+# include packages
+import sys, os, re, shlex, subprocess
+# six is a Python 2 and 3 compatibility library
+import six
+
+# path to iptables binary
+IPTABLES="/sbin/iptables"
+
+# debugging switch
+TRACE_ENABLED = 0
+
+# define paths to config files
+ROOT = "/root/firewall"
+WHITELIST = ROOT + "/whitelist.txt"
+BLACKLIST = ROOT + "/blacklist.txt"
+OUTBOUND = ROOT + "/outbound.txt"
+ALLOWED = ROOT + "/open-ports.txt"
+PORTFWD = ROOT + "/portforward.txt"
+
+# config parsing functions
+def ignore_config_line(str):
+	"Check if string starts with a comment or is blank"
+	m1 = re.match("(^#)", str.strip())
+	m2 = re.match("(^$)", str.strip())
+	if m1 or m2:
+		return True
+	return False
+
+def trace(string):
+	"Trace debugging function"
+	if TRACE_ENABLED:
+		print string
+		return True
+	return False
+
+def is_string(value):
+	"Test if input is a string"
+	if isinstance(value, six.string_types):
+		return True
+	return False
+
+def strip_comments(string):
+	"Function removes comments from config lines"
+	m = re.search('^(.+?)(#.+?)?$', string)
+	if m:
+		return m.group(1)
+	return False
+
+def iptables(args):
+	"Call IPTABLES shell command"
+	if is_string(args):
+		args = shlex.split(args)
+	# prepend args with iptables command
+	args = [IPTABLES] + args
+	# compile the command string
+	cmd = ' '.join(args)
+	# split into a safe argument list
+	args = shlex.split(cmd)
+	# print for reference
+	trace(cmd)
+	# execute the command
+	return subprocess.call(args)
+
+def fw_reset():
+	"Reset all IP Tables rules"
+	print "Dropping all existing filter rules"
+	iptables("-F")
+	iptables("-X")
+	iptables("-t nat -F")
+	iptables("-t nat -X")
+	iptables("-t mangle -F")
+	iptables("-t mangle -X")
+	iptables("-t raw -F")
+	iptables("-t raw -X")
+	iptables("-P INPUT ACCEPT")
+	iptables("-P FORWARD ACCEPT")
+	iptables("-P OUTPUT ACCEPT")
+	# create a logging chain
+	iptables("-N LOGDROP")
+	iptables("-A LOGDROP -m limit --limit 30/min -j LOG --log-prefix \"IPTables-Dropped: \" --log-level 4")
+	iptables("-A LOGDROP -j DROP")
+	# allow pre-existing connections
+	iptables("-A INPUT -i eth0 -m state --state RELATED,ESTABLISHED -j ACCEPT")
+	iptables("-A INPUT -i tun+ -m state --state RELATED,ESTABLISHED -j ACCEPT")
+	iptables("-A INPUT -i ppp+ -m state --state RELATED,ESTABLISHED -j ACCEPT")
+	iptables("-A INPUT -i vpn+ -m state --state RELATED,ESTABLISHED -j ACCEPT")
+	# accept GRE packets (required for pptpd)
+	iptables("-A INPUT -p 47 -j ACCEPT")
+	iptables("-A OUTPUT -p 47 -j ACCEPT")
+
+def fw_masquerade(interface):
+	"Masquarade packets leaving interfaces (SNAT)"
+	print "MASQUERADE: " + interface
+	iptables(["-A POSTROUTING -t nat -o", interface, "-j MASQUERADE"])
+
+def fw_whitelist(addr):
+	"Add IP address to the whitelist"
+	print "WHITELIST: " + addr
+	iptables(["-A INPUT -t filter -s", addr, "-j ACCEPT"])
+
+def fw_outbound(interface,proto='tcp',destAddr='ANY',destPort='ANY'):
+	"Block outgoing connections"
+	cmd = ["-A","OUTPUT"]
+	if interface and interface != "ANY":
+		cmd += ["-o",interface]
+	cmd += ["-p",proto]
+	if destAddr and destAddr != "ANY":
+		cmd += ["-d",destAddr]
+	if destPort and destPort != "ANY":
+		cmd += ["--dport",destPort]
+	cmd += ["-j","DROP"]
+	print "OUTBOUND BLOCK: " + ' '.join([interface,proto,destAddr,destPort])
+	iptables(cmd)
+
+
+def fw_blacklist(addr):
+	"Add IP address to the BLACKLIST - drop packets IN and OUT"
+	print "BLACKLISTED: " + addr
+	iptables(["-A INPUT -t filter -s", addr, "-j DROP"])
+	iptables(["-A OUTPUT -d", addr, "-j DROP"])
+
+def fw_openport(interface,port,proto='tcp',srcAddr=None,srcPort=None):
+	"Open a local port to the world or to one source"
+	cmd = ["-t","filter","-A","INPUT"]
+	cmd += ["-i",interface]
+	cmd += ["-p",proto]
+	cmd += ["--dport",port]
+	if srcAddr and srcPort:
+		cmd += ["-s",srcAddr+':'+srcPort]
+	elif srcAddr:
+		if "-" in srcAddr:
+			cmd += ["-m","iprange","--src-range",srcAddr]
+		else:
+			cmd += ["--source",srcAddr]
+	elif srcPort:
+		cmd += ["--sport",srcPort]
+	cmd += ["-j","ACCEPT"]
+	if srcAddr == None:
+		srcAddr = ""
+	if srcPort == None:
+		srcPort = ""
+	print "OPEN PORT: " + ' '.join([interface,proto,port,srcAddr,srcPort])
+	iptables(cmd)
+	
+
+def fw_portforward(interface,fwdPort,destAddr,destPort,proto='tcp',srcAddr=None,srcPort=None):
+	"Configure Port forwarding rule"
+	cmd = ["-t","nat"]
+	cmd += ["-A","PREROUTING"]
+	cmd += ["-i",interface]
+	cmd += ["-p",proto]
+	if srcAddr and srcPort:
+		cmd += ["--source",srcAddr]
+		cmd += ["--source-port",srcPort]
+	elif srcAddr:
+		if "-" in srcAddr:
+			cmd += ["-m","iprange","--src-range",srcAddr]
+		else:
+			cmd += ["--source",srcAddr]
+	elif srcPort:
+		cmd += ["--source-port",srcPort]
+	if fwdPort:
+		cmd += ["--destination-port",fwdPort]
+	cmd += ["-j","DNAT","--to"]
+	if destAddr and destPort:
+		cmd += [destAddr + ":" + destPort]
+	elif destAddr:
+		cmd += [destAddr]
+	print "PORT FWD: " + ' '.join([interface,fwdPort,destAddr,destPort,proto])
+	iptables(cmd)
+
+
+################################################################################
+################################################################################
+
+print "ENABLE PORT FORWARDING"
+subprocess.call(shlex.split("sysctl net.ipv4.ip_forward=1"))
+
+# reset all rules
+fw_reset()
+
+# do auto-SNAT on interfaces
+fw_masquerade("eth0")
+fw_masquerade("vpn+")
+
+# process the whitelist
+with open(WHITELIST) as file:
+	for line in file:
+		line = line.strip()
+		if ignore_config_line(line):
+			continue
+		line = strip_comments(line)
+		fw_whitelist(line)
+
+# process the blacklist
+with open(BLACKLIST) as file:
+	for line in file:
+		# syntax: interface proto [destAddr] [destPort]
+		# ANY or * (asterisk) will match all
+		line = line.strip()
+		if ignore_config_line(line):
+			continue
+		line = strip_comments(line)
+		fw_blacklist(line)
+
+# process the outgoing rules
+with open(OUTBOUND) as file:
+	for line in file:
+		# syntax: interface proto [destAddr] [destPort]
+		line = line.strip()
+		if ignore_config_line(line):
+			continue
+		line = strip_comments(line)
+		# split the line into arguments
+		args = line.split(' ')
+		# define iptables params
+		interface = args[0]
+		proto = args[1]
+		if len(args) >= 3:
+			destAddr = args[2]
+		else:
+			destAddr = 'ANY'
+		if len(args) >= 4:
+			destPort = args[3]
+		else:
+			destPort = 'ANY'
+		# run iptables command
+		fw_outbound(interface,proto,destAddr,destPort)
+
+# process the open ports
+with open(ALLOWED) as file:
+	for line in file:
+		line = line.strip()
+		if ignore_config_line(line):
+			continue
+		line = strip_comments(line)
+		# split the line into arguments
+		args = line.split(' ')
+		# define iptables params
+		interface = args[0]
+		proto = args[1]
+		port = args[2]
+		if len(args) >= 4:
+			srcAddr = args[3]
+		else:
+			srcAddr = None
+		if len(args) >= 5:
+			srcPort = args[4]
+		else:
+			srcPort = None
+		# call function to add rule
+		fw_openport(interface,port,proto,srcAddr,srcPort)
+
+
+# process port forwarding rules
+with open(PORTFWD) as file:
+	for line in file:
+		line = line.strip()
+		if ignore_config_line(line):
+			continue
+		line = strip_comments(line)
+		# split the line into arguments
+		args = line.split(' ')
+		# define iptables params
+		interface = args[0]
+		proto = args[1]
+		fwdPort = args[2]
+		destAddr = args[3]
+		destPort = args[4]
+		# add optional arguments
+		if len(args) >= 6:
+			srcAddr = args[5]
+		else:
+			srcAddr = None
+		if len(args) >= 7:
+			srcPort = args[6]
+		else:
+			srcPort = None
+		# call function to add rule
+		fw_portforward(interface,fwdPort,destAddr,destPort,proto,srcAddr,srcPort)
+
+
+# unless its mentioned above, just drop it
+iptables("-A INPUT -t filter -p all -j LOGDROP")
+
+

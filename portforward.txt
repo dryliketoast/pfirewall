@@ -1,0 +1,4 @@
+# syntax: interface protocol external_port dest_ip [dest_port] [src_address]
+# example: eth0 tcp 9999 10.83.0.3 8080 86.146.198.170
+
+

@@ -1,0 +1,6 @@
+# list ip addresses / domain names you explicitly want to open all ports to
+# traffic from these addresses will pass straight through the firewall
+127.0.0.1
+
+
+

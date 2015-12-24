@@ -1,0 +1,7 @@
+# syntax: interface proto port [sourceAddr] [sourcePort]
+# example: eth0 tcp 8080 1.2.3.4
+
+eth0 tcp 22 # ssh
+eth0 tcp 80 # http
+eth0 tcp 443 # https
+
