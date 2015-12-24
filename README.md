@@ -4,6 +4,7 @@ iptables python wrapper for easy firewall configuration on linux
 ## Setup
 - Copy the files to your server
 - Customise the configuration files (ending .txt)
+- Make sure the script is executable `chmod +x firewall.python`
 - Run the firewall.python script
 
 ## Load script on boot
