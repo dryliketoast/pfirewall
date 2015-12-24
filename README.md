@@ -8,7 +8,7 @@ iptables python wrapper for easy firewall configuration on linux
 - Run the firewall.python script
 
 ## Load script on boot
-To load the firewall before the network interface starts on debian/ubuntu, add this to your network block:
+To load the firewall before the network interface starts on debian/ubuntu, add this to your network block in the file /etc/network/interfaces
 ```
 pre-up /your/path/to/pfirewall/firewall.python
 ```
