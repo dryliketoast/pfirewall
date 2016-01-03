@@ -92,6 +92,13 @@ def fw_reset():
         # allow localhost traffic
         iptables("-A INPUT -i lo -j ACCEPT")
 
+def fw_icmp():
+	"Allow ICMP Pings"
+	print "Allowing ICMP"
+	iptables(["-A INPUT -p icmp --icmp-type 8 -m state --state NEW,ESTABLISHED,RELATED -j ACCEPT"])
+	iptables(["-A INPUT -p icmp --icmp-type 0 -m state --state ESTABLISHED,RELATED -j ACCEPT"])
+
+
 def fw_masquerade(interface):
 	"Masquarade packets leaving interfaces (SNAT)"
 	print "MASQUERADE: " + interface
@@ -182,6 +189,9 @@ subprocess.call(shlex.split("sysctl net.ipv4.ip_forward=1"))
 
 # reset all rules
 fw_reset()
+
+# allow icmp pings
+fw_icmp()
 
 # do auto-SNAT on interfaces
 fw_masquerade("eth0")
