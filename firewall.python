@@ -89,6 +89,8 @@ def fw_reset():
 	# accept GRE packets (required for pptpd)
 	iptables("-A INPUT -p 47 -j ACCEPT")
 	iptables("-A OUTPUT -p 47 -j ACCEPT")
+        # allow localhost traffic
+        iptables("-A INPUT -i lo -j ACCEPT")
 
 def fw_masquerade(interface):
 	"Masquarade packets leaving interfaces (SNAT)"
